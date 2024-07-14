@@ -1,0 +1,358 @@
+import 'dart:async';
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import 'package:intl/intl.dart';
+
+void main() {
+  runApp(MyApp());
+}
+
+class MyApp extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      home: PostDataToServerPage(),
+    );
+  }
+}
+
+class PostDataToServerPage extends StatefulWidget {
+  @override
+  _PostDataToServerPageState createState() => _PostDataToServerPageState();
+}
+
+class _PostDataToServerPageState extends State<PostDataToServerPage> {
+  late String _timeString = '';
+  TimeOfDay? _selectedTime;
+  Timer? _timer;
+  Timer? _checkTimer;
+  bool _hasSwitched = false;
+  bool _isSwitched = false;
+
+  String responseMessage = "";
+  List<String> devices = [];
+  List<String> roomNames = []; // Room names for each device
+  List<String> locations = []; // Locations for each device
+  Map<int, bool> deviceStates = {0: false}; // States of the devices
+
+  TextEditingController deviceController = TextEditingController();
+  TextEditingController roomController = TextEditingController();
+  TextEditingController locationController = TextEditingController();
+  TextEditingController renameController = TextEditingController();
+  TextEditingController renameRoomController = TextEditingController();
+  TextEditingController renameLocationController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _getTime();
+    _startTimer();
+    _startCheckTimer();
+  }
+
+  void _getTime() {
+    final String formattedDateTime = DateFormat('HH:mm:ss').format(DateTime.now());
+    setState(() {
+      _timeString = formattedDateTime;
+    });
+  }
+
+  void _startTimer() {
+    _timer = Timer.periodic(Duration(seconds: 1), (Timer t) => _getTime());
+  }
+
+  void _startCheckTimer() {
+    _checkTimer = Timer.periodic(Duration(seconds: 1), (Timer t) => _checkTime());
+  }
+
+  Future<void> _selectTime(BuildContext context) async {
+    final TimeOfDay? picked = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.now(),
+    );
+    if (picked != null) {
+      setState(() {
+        _selectedTime = picked;
+        _hasSwitched = false; // Reset switch state when a new time is selected
+      });
+    }
+  }
+
+  void _checkTime() {
+    if (_selectedTime != null && !_hasSwitched) {
+      final now = TimeOfDay.now();
+      if (now.hour == _selectedTime!.hour && now.minute == _selectedTime!.minute) {
+        setState(() {
+          _isSwitched = !_isSwitched;
+          _hasSwitched = true;
+        });
+      }
+    }
+  }
+
+  void _toggleSwitch(bool value) {
+    setState(() {
+      _isSwitched = value;
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _checkTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> postDataToServer(String device, bool state) async {
+    String url = 'http://192.168.0.118:5010/control?fbclid=IwZXh0bgNhZW0CMTAAAR1hEwyCnJTT_DFyuSwRAeu3nQ1GMxWtck1zgPGDfmj47DQX85HUsWgWFCs_aem_xQAv5TPGWhngRmMxNT-mqw';
+
+    try {
+      final response = await http.post(
+        Uri.parse(url),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({
+          'topic': '/plug',
+          'msg': state ? 'poweron2' : 'poweroff2',
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        setState(() {
+          responseMessage = "POST successful: ${response.body}";
+        });
+      } else {
+        setState(() {
+          responseMessage = "Failed to post data. Status code: ${response.statusCode}";
+        });
+      }
+    } catch (e) {
+      setState(() {
+        responseMessage = "Exception: $e";
+      });
+    }
+  }
+
+  void addDevice(String deviceName, String location, String roomName) {
+    setState(() {
+      devices.add(deviceName);
+      locations.add(location);
+      roomNames.add(roomName);
+      deviceStates[devices.length - 1] = false; // Add a new state for the new device
+    });
+  }
+
+  void renameDevice(int index, String newName, String newLocation, String newRoomName) {
+    setState(() {
+      devices[index] = newName;
+      locations[index] = newLocation;
+      roomNames[index] = newRoomName;
+    });
+  }
+
+  void deleteDevice(int index) {
+    setState(() {
+      devices.removeAt(index);
+      locations.removeAt(index);
+      roomNames.removeAt(index);
+      deviceStates.remove(index);
+    });
+  }
+
+  void showRenameDeleteDialog(int index) {
+    renameController.text = devices[index];
+    renameLocationController.text = locations[index];
+    renameRoomController.text = roomNames[index];
+
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text('Edit Device'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: renameController,
+                decoration: InputDecoration(hintText: "Enter new device name"),
+              ),
+              TextField(
+                controller: renameLocationController,
+                decoration: InputDecoration(hintText: "Enter new location"),
+              ),
+              TextField(
+                controller: renameRoomController,
+                decoration: InputDecoration(hintText: "Enter new room name"),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              child: Text('Cancel'),
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+            ),
+            TextButton(
+              child: Text('Rename'),
+              onPressed: () {
+                String newName = renameController.text.trim();
+                String newLocation = renameLocationController.text.trim();
+                String newRoomName = renameRoomController.text.trim();
+                if (newName.isNotEmpty && newLocation.isNotEmpty && newRoomName.isNotEmpty) {
+                  renameDevice(index, newName, newLocation, newRoomName);
+                }
+                Navigator.of(context).pop();
+              },
+            ),
+            TextButton(
+              child: Text('Delete'),
+              onPressed: () {
+                deleteDevice(index);
+                Navigator.of(context).pop();
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('POST Request to Server'),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Center(
+              child: Text(
+                'Current Time: $_timeString',
+                style: TextStyle(fontSize: 16),
+              ),
+            ),
+          ),
+        ],
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(20.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'Device Control',
+              style: TextStyle(fontSize: 20),
+            ),
+            SizedBox(height: 20),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: deviceController,
+                    decoration: InputDecoration(
+                      labelText: 'New Device Name',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ),
+                SizedBox(width: 10),
+                Expanded(
+                  child: TextField(
+                    controller: locationController,
+                    decoration: InputDecoration(
+                      labelText: 'Location',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ),
+                SizedBox(width: 10),
+                Expanded(
+                  child: TextField(
+                    controller: roomController,
+                    decoration: InputDecoration(
+                      labelText: 'Room Name',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ),
+                SizedBox(width: 10),
+                ElevatedButton(
+                  onPressed: () {
+                    String deviceName = deviceController.text.trim();
+                    String location = locationController.text.trim();
+                    String roomName = roomController.text.trim();
+                    if (deviceName.isNotEmpty && location.isNotEmpty && roomName.isNotEmpty) {
+                      addDevice(deviceName, location, roomName);
+                      deviceController.clear();
+                      locationController.clear();
+                      roomController.clear();
+                    }
+                  },
+                  child: Text('Add Device'),
+                ),
+              ],
+            ),
+            SizedBox(height: 20),
+            Text(
+              responseMessage,
+              style: TextStyle(fontSize: 16),
+            ),
+            SizedBox(height: 20),
+            Text(
+              'Devices:',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+            Expanded(
+              child: GridView.builder(
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 2, // Number of columns
+                  crossAxisSpacing: 10.0,
+                  mainAxisSpacing: 20.0,
+                  childAspectRatio: 2.0, // Adjust this ratio as needed
+                ),
+                itemCount: devices.length,
+                itemBuilder: (context, index) {
+                  return Center(
+                    child: GestureDetector(
+                      onLongPress: () {
+                        showRenameDeleteDialog(index);
+                      },
+                      child: Container(
+                        padding: EdgeInsets.all(16.0),
+                        decoration: BoxDecoration(
+                          color: Colors.grey[200],
+                          borderRadius: BorderRadius.circular(12.0),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Expanded(
+                              child: Text('${devices[index]} (${locations[index]}) ${roomNames[index]}'),
+                            ),
+                            Switch(
+                              value: deviceStates[index]!,
+                              onChanged: (value) {
+                                setState(() {
+                                  deviceStates[index] = value;
+                                  postDataToServer(devices[index], value);
+                                });
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
